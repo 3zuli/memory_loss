@@ -1,3 +1,5 @@
+// Arduino Nano, may need to select processor "ATmega328P (Old bootloader)"
+
 // A custom version of E24 by @blemasle https://github.com/blemasle/arduino-e24
 // Transmits only single byte addresses, this makes it work with 24LC16 
 #include "eeprom.h"
@@ -5,11 +7,11 @@
 #define FORCE_EEPROM_INIT 0
 // #define SIMULATE_FAIL_AFTER 10
 
-#define WRITE_CYCLE_DELAY_FAST 10 // [ms] // EEPROM read + write cycle takes about 7ms
+#define WRITE_CYCLE_DELAY_FAST 1 // [ms] // EEPROM read + write cycle takes about 7ms
 #define WRITE_CYCLE_DELAY_SLOW 5000 // [ms]
 
 #define SERIAL_PRINT_INTERVAL 500
-#define SAVE_CHECKPOINT_INTERVAL 1000
+#define SAVE_CHECKPOINT_INTERVAL 2000
 
 #define SECRET 0xDEADBEEF
 #define INFO_DATA_ADDR 0
@@ -32,11 +34,17 @@ typedef struct {
   uint8_t data[TEST_DATA_LENGTH];
 } EEData;
 
+
 const EEData defaultTestData = {.data = {0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff}};
+const EEData testData[2] = {
+  {.data = {0x55, 0x55, 0x55, 0x55, 0x55, 0x55, 0x55, 0x55}},
+  {.data = {0xAA, 0xAA, 0xAA, 0xAA, 0xAA, 0xAA, 0xAA, 0xAA}}
+};
 
 EEInfo currentEEInfo;
 EEData currentTestData;
 EEData prevTestData;
+uint8_t currentTestDataIndex = 0;
 
 uint32_t writeCycleCounter = 0;
 uint32_t writeCycleDelay = WRITE_CYCLE_DELAY_FAST;
@@ -54,6 +62,7 @@ void setup() {
   pinMode(LED_PIN, OUTPUT);
   delay(100);
   // Serial.println(sizeof(EEInfo));
+  Serial.println("Start");
 
 
   EEInfo info = readEEInfo();
@@ -77,6 +86,9 @@ void setup() {
     writeCycleCounter = currentEEInfo.countCheckpoint;
   }
 
+  // Write test data for the first time
+  writeTestData(testData[currentTestDataIndex]);
+  
   currentTestData = readTestData();
   Serial.println("Starting with test data:");
   printTestData(currentTestData);
@@ -88,6 +100,9 @@ void loop() {
   prevTestData = currentTestData;
   writeCycleCounter++;
 
+  writeTestData(testData[currentTestDataIndex]); // Write test data into EEPROM
+  currentTestData = readTestData(); // Read it back
+
   if (writeCycleCounter % SERIAL_PRINT_INTERVAL == 0) {
     Serial.println(writeCycleCounter);
   }
@@ -95,10 +110,9 @@ void loop() {
     currentEEInfo.countCheckpoint = writeCycleCounter;
     writeEEInfo(currentEEInfo);
     Serial.println("Saved checkpoint");
+    Serial.print("Written data: "); printTestData(testData[currentTestDataIndex]);
+    Serial.print("Read data:    "); printTestData(currentTestData);
   }
-
-  writeTestData(currentTestData); // Write test data into EEPROM
-  currentTestData = readTestData(); // Read it back
 
   #ifdef SIMULATE_FAIL_AFTER
     // Simulate eeprom failure by changing the read value
@@ -108,11 +122,11 @@ void loop() {
   #endif
 
   // Check if the read data has changed
-  if (!checkTestData(prevTestData, currentTestData)) {
+  if (!checkTestData(testData[currentTestDataIndex], currentTestData)) {
     Serial.println("READ DATA MISMATCH!!!");
     Serial.print("Cycle:        "); Serial.println(writeCycleCounter);
-    Serial.print("Prev data:    "); printTestData(prevTestData);
-    Serial.print("Current data: "); printTestData(currentTestData);
+    Serial.print("Written data: "); printTestData(testData[currentTestDataIndex]);
+    Serial.print("Read data:    "); printTestData(currentTestData);
     if (currentEEInfo.firstError == 0) {
       // If this is the first error, save it and save a count checkpoint as well
       currentEEInfo.firstError = writeCycleCounter;
@@ -133,6 +147,8 @@ void loop() {
   }
   // uint32_t t2 = millis();
   // Serial.println(t2-t1);
+
+  currentTestDataIndex = (currentTestDataIndex + 1) % 2;
   delay(writeCycleDelay);
 }
 
